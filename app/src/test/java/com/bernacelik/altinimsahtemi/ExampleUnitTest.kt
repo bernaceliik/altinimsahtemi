@@ -1,4 +1,4 @@
-package com.bernacelik.myapplication
+package com.bernacelik.altinimsahtemi
 
 import org.junit.Test
 
