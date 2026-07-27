@@ -21,4 +21,5 @@ dependencyResolutionManagement {
 
 rootProject.name = "altinimsahtemi"
 include(":app")
+include(":core-audio")
  
