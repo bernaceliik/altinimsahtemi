@@ -19,6 +19,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bernacelik.altinimsahtemi.ui.theme.*
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 // Kütüphane Veri Modeli - Tamamen korundu
 data class RecordItem(
@@ -47,11 +52,60 @@ fun GoldLibraryScreen( // Projedeki diğer kopyalarla çakışmaması için benz
     var selectedRecordForDetail by remember { mutableStateOf<RecordItem?>(null) }
     var showDetailDialog by remember { mutableStateOf(false) }
 
+    // Firebase Entegrasyonu
+    val user = remember { FirebaseAuth.getInstance().currentUser }
+    val userId = user?.uid ?: "anonymous"
+    val db = remember { FirebaseFirestore.getInstance() }
+    var firestoreRecords by remember { mutableStateOf<List<RecordItem>>(emptyList()) }
+    var isFetching by remember { mutableStateOf(false) }
+
+    LaunchedEffect(userId) {
+        if (userId != "anonymous") {
+            isFetching = true
+            db.collection("user_captures")
+                .whereEqualTo("userId", userId)
+                .orderBy("createdAt", com.google.firebase.firestore.Query.Direction.DESCENDING)
+                .get()
+                .addOnSuccessListener { querySnapshot ->
+                    isFetching = false
+                    val list = mutableListOf<RecordItem>()
+                    var counter = 1
+                    for (doc in querySnapshot) {
+                        val mat = doc.getString("material") ?: "24K"
+                        val obj = doc.getString("objectType") ?: "Gram"
+                        val surf = doc.getString("surface") ?: "Mermer"
+                        val isReal = doc.getBoolean("isGenuineGold") ?: true
+                        val timestamp = doc.getLong("createdAt") ?: 0L
+                        
+                        val timeStr = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(timestamp))
+                        val isToday = android.text.format.DateUtils.isToday(timestamp)
+                        val dateGroup = if (isToday) "BUGÜN" else "GEÇMİŞ"
+                        
+                        list.add(
+                            RecordItem(
+                                id = counter++,
+                                material = if (isReal) mat else "$mat (Sahte)",
+                                objectType = obj,
+                                time = timeStr,
+                                details = "$surf zemin",
+                                color = if (isReal) GoldPrimary else Color.Red,
+                                dateGroup = dateGroup
+                            )
+                        )
+                    }
+                    firestoreRecords = list
+                }
+                .addOnFailureListener {
+                    isFetching = false
+                }
+        }
+    }
+
     // İstediğin gibi 24 Ayar filtresi listeye dahil edildi!
     val filters = listOf("Tümü", "24 Ayar", "22 Ayar", "14 Ayar", "Sahte")
 
     // Arama ve Akıllı Filtreleme İşlemi (Çift yönlü kontrol yapısı)
-    val filteredRecords = records.filter { record ->
+    val filteredRecords = firestoreRecords.filter { record ->
         val matchesSearch = record.material.contains(searchText, ignoreCase = true) || record.objectType.contains(searchText, ignoreCase = true)
 
         val matchesFilter = when (selectedFilter) {
@@ -92,7 +146,14 @@ fun GoldLibraryScreen( // Projedeki diğer kopyalarla çakışmaması için benz
             }
         }
 
-        if (records.isEmpty()) {
+        if (isFetching) {
+            Box(
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(color = GoldPrimary)
+            }
+        } else if (firestoreRecords.isEmpty()) {
             // --- BOŞ KÜTÜPHANE GÖRÜNÜMÜ ---
             Column(
                 modifier = Modifier
