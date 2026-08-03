@@ -43,6 +43,7 @@ android {
 
 dependencies {
     implementation(project(":core-audio"))
+    implementation("com.google.android.gms:play-services-auth:20.7.0")
     // Kataloğu bypass edip Gradle 8.7.2 ile mükemmel çalışan kararlı sürümleri doğrudan tanımlıyoruz:
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
