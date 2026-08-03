@@ -22,6 +22,7 @@ import kotlinx.coroutines.delay
 fun AudioResultScreen(
     material: String,
     objectType: String,
+    wavPath: String,
     onNavigateToReview: () -> Unit,
     onNavigateToHome: () -> Unit
 ) {
