@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "948401168902",
+    "project_id": "altinimsahtemi",
+    "storage_bucket": "altinimsahtemi.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:948401168902:android:ac9113c56cafcd8bd69987",
+        "android_client_info": {
+          "package_name": "com.bernacelik.altinimsahtemi"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyB4X-echjME80BJ5hgiJC1shnByZIi0SIY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
