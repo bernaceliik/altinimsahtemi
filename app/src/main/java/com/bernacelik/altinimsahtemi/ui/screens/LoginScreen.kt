@@ -14,17 +14,22 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bernacelik.altinimsahtemi.ui.theme.*
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LoginScreen(
     onNavigateBack: () -> Unit,
-    onLoginSuccess: () -> Unit,
+    onLoginSuccess: (role: String, isApproved: Boolean, businessName: String, taxNumber: String) -> Unit,
     onNavigateToGoogleSignIn: () -> Unit,
     onNavigateToForgotPassword: () -> Unit // Yeni yönlendirme callback'imiz
 ) {
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
+    val auth = remember { FirebaseAuth.getInstance() }
 
     Column(
         modifier = Modifier
@@ -100,17 +105,66 @@ fun LoginScreen(
             )
         }
 
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(errorMessage!!, color = Color.Red, fontSize = 14.sp)
+        }
+
         Spacer(modifier = Modifier.height(32.dp))
 
         Button(
-            onClick = onLoginSuccess,
+            onClick = {
+                if (email.isBlank() || password.isBlank()) {
+                    errorMessage = "Lütfen tüm alanları doldurun."
+                    return@Button
+                }
+                isLoading = true
+                errorMessage = null
+                auth.signInWithEmailAndPassword(email.trim(), password)
+                    .addOnCompleteListener { task ->
+                        if (task.isSuccessful) {
+                            val uid = task.result?.user?.uid
+                            if (uid != null) {
+                                val db = FirebaseFirestore.getInstance()
+                                db.collection("users").document(uid).get()
+                                    .addOnSuccessListener { document ->
+                                        isLoading = false
+                                        if (document != null && document.exists()) {
+                                            val role = document.getString("role") ?: "individual"
+                                            val isApproved = document.getBoolean("isApproved") ?: true
+                                            val businessName = document.getString("businessName") ?: ""
+                                            val taxNumber = document.getString("taxNumber") ?: ""
+                                            onLoginSuccess(role, isApproved, businessName, taxNumber)
+                                        } else {
+                                            onLoginSuccess("individual", true, "", "")
+                                        }
+                                    }
+                                    .addOnFailureListener { e ->
+                                        isLoading = false
+                                        errorMessage = "Kullanıcı verisi alınamadı: ${e.localizedMessage}"
+                                    }
+                            } else {
+                                isLoading = false
+                                onLoginSuccess("individual", true, "", "")
+                            }
+                        } else {
+                            isLoading = false
+                            errorMessage = task.exception?.localizedMessage ?: "Giriş başarısız."
+                        }
+                    }
+            },
+            enabled = !isLoading,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
             colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text("Giriş yap", color = DarkBackground, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            if (isLoading) {
+                CircularProgressIndicator(color = DarkBackground, modifier = Modifier.size(24.dp))
+            } else {
+                Text("Giriş yap", color = DarkBackground, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+            }
         }
 
         Spacer(modifier = Modifier.height(24.dp))
