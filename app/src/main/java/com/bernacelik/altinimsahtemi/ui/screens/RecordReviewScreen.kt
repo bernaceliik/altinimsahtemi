@@ -16,14 +16,33 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.BorderStroke
 import com.bernacelik.altinimsahtemi.ui.theme.*
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.storage.FirebaseStorage
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 
 @Composable
 fun RecordReviewScreen(
     duration: String,
+    wavPath: String,
+    material: String,
+    objectType: String,
+    surface: String,
     onSaveAndUpload: () -> Unit,
     onDiscardAndRepeat: () -> Unit,
     onNavigateToProfile: () -> Unit // YENİ: Profil yönlendirme parametresi eklendi!
 ) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var isLoading by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -123,12 +142,64 @@ fun RecordReviewScreen(
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             Button(
-                onClick = onSaveAndUpload,
+                onClick = {
+                    if (isLoading) return@Button
+                    isLoading = true
+                    coroutineScope.launch {
+                        try {
+                            val user = FirebaseAuth.getInstance().currentUser
+                            val userId = user?.uid ?: "anonymous"
+                            val timestamp = System.currentTimeMillis()
+                            val storagePath = "raw/user_tests/$userId/$timestamp.wav"
+                            
+                            // 1. Upload WAV file to Storage
+                            val wavFile = java.io.File(wavPath)
+                            if (wavFile.exists()) {
+                                FirebaseStorage.getInstance().reference.child(storagePath)
+                                    .putStream(wavFile.inputStream())
+                                    .await()
+                            }
+                            
+                            // 2. Save metadata to Firestore
+                            val isReal = !material.contains("Sahte", ignoreCase = true) &&
+                                    !material.contains("Pirinç", ignoreCase = true) &&
+                                    !material.contains("Tungsten", ignoreCase = true)
+                                    
+                            val captureData = mapOf(
+                                "userId" to userId,
+                                "material" to material,
+                                "objectType" to objectType,
+                                "surface" to surface,
+                                "duration" to duration,
+                                "storagePath" to storagePath,
+                                "isGenuineGold" to isReal,
+                                "createdAt" to timestamp
+                            )
+                            
+                            FirebaseFirestore.getInstance()
+                                .collection("user_captures")
+                                .document(java.util.UUID.randomUUID().toString())
+                                .set(captureData)
+                                .await()
+                                
+                            isLoading = false
+                            onSaveAndUpload()
+                        } catch (e: Exception) {
+                            isLoading = false
+                            Toast.makeText(context, "Hata: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                },
+                enabled = !isLoading,
                 modifier = Modifier.fillMaxWidth().height(56.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
                 shape = RoundedCornerShape(12.dp)
             ) {
-                Text("Kaydet ve Yükle", color = DarkBackground, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                if (isLoading) {
+                    CircularProgressIndicator(color = DarkBackground, modifier = Modifier.size(24.dp))
+                } else {
+                    Text("Kaydet ve Yükle", color = DarkBackground, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
             }
 
             Button(

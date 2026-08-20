@@ -16,6 +16,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bernacelik.altinimsahtemi.ui.theme.*
+import com.google.firebase.auth.FirebaseAuth
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -24,7 +25,10 @@ fun ForgotPasswordScreen(
 ) {
     var email by remember { mutableStateOf("") }
     var isLinkSent by remember { mutableStateOf(false) }
+    var isLoading by remember { mutableStateOf(false) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     val context = LocalContext.current
+    val auth = remember { FirebaseAuth.getInstance() }
 
     Column(
         modifier = Modifier
@@ -100,30 +104,56 @@ fun ForgotPasswordScreen(
             )
         }
 
+        if (errorMessage != null) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = errorMessage!!,
+                color = Color.Red,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
         Spacer(modifier = Modifier.height(32.dp))
 
         // Gönder Butonu
         Button(
             onClick = {
-                if (email.isNotEmpty() && email.contains("@")) {
-                    isLinkSent = true
-                    Toast.makeText(context, "Bağlantı e-postanıza gönderildi!", Toast.LENGTH_SHORT).show()
+                if (email.trim().isNotEmpty() && email.contains("@")) {
+                    isLoading = true
+                    isLinkSent = false
+                    errorMessage = null
+                    auth.sendPasswordResetEmail(email.trim())
+                        .addOnCompleteListener { task ->
+                            isLoading = false
+                            if (task.isSuccessful) {
+                                isLinkSent = true
+                                Toast.makeText(context, "Bağlantı e-postanıza gönderildi!", Toast.LENGTH_SHORT).show()
+                            } else {
+                                errorMessage = task.exception?.localizedMessage ?: "Bağlantı gönderme başarısız."
+                            }
+                        }
                 } else {
                     Toast.makeText(context, "Lütfen geçerli bir e-posta adresi girin.", Toast.LENGTH_SHORT).show()
                 }
             },
+            enabled = !isLoading,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(56.dp),
             colors = ButtonDefaults.buttonColors(containerColor = GoldPrimary),
             shape = RoundedCornerShape(12.dp)
         ) {
-            Text(
-                text = "Sıfırlama bağlantısı gönder",
-                color = DarkBackground,
-                fontSize = 18.sp,
-                fontWeight = FontWeight.Bold
-            )
+            if (isLoading) {
+                CircularProgressIndicator(color = DarkBackground, modifier = Modifier.size(24.dp))
+            } else {
+                Text(
+                    text = "Sıfırlama bağlantısı gönder",
+                    color = DarkBackground,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }

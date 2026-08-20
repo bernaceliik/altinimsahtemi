@@ -19,6 +19,19 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bernacelik.altinimsahtemi.ui.theme.*
 import kotlinx.coroutines.delay
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.platform.LocalContext
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
+import com.google.android.gms.common.api.ApiException
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.GoogleAuthProvider
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.tasks.await
 
 @Composable
 fun GoogleSignInScreen(
@@ -27,12 +40,56 @@ fun GoogleSignInScreen(
 ) {
     var isLoading by remember { mutableStateOf(false) }
     var selectedAccount by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
 
-    // Eğer bir hesap seçildiyse ufak bir yüklenme simülasyonu yapıp ana ekrana yönlendiriyoruz
-    LaunchedEffect(isLoading) {
-        if (isLoading) {
-            delay(1500) // 1.5 saniye yükleniyor animasyonu göster
-            onSignInSuccess()
+    val gso = remember {
+        val resId = context.resources.getIdentifier("default_web_client_id", "string", context.packageName)
+        val webClientId = if (resId != 0) context.getString(resId) else "948401168902-mockwebclientid.apps.googleusercontent.com"
+        GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN)
+            .requestIdToken(webClientId)
+            .requestEmail()
+            .build()
+    }
+
+    val googleSignInClient = remember { GoogleSignIn.getClient(context, gso) }
+
+    val launcher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.getResult(ApiException::class.java)
+            val credential = GoogleAuthProvider.getCredential(account.idToken, null)
+            selectedAccount = account.displayName ?: (account.email ?: "Google Kullanıcısı")
+            isLoading = true
+            coroutineScope.launch {
+                try {
+                    val authResult = FirebaseAuth.getInstance().signInWithCredential(credential).await()
+                    val user = authResult.user
+                    if (user != null) {
+                        val db = FirebaseFirestore.getInstance()
+                        val userDoc = db.collection("users").document(user.uid).get().await()
+                        if (!userDoc.exists()) {
+                            val profile = mapOf(
+                                "uid" to user.uid,
+                                "email" to (user.email ?: ""),
+                                "role" to "User",
+                                "isApproved" to true
+                            )
+                            db.collection("users").document(user.uid).set(profile).await()
+                        }
+                    }
+                    isLoading = false
+                    onSignInSuccess()
+                } catch (e: Exception) {
+                    isLoading = false
+                    Toast.makeText(context, "Firebase Hatası: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+                }
+            }
+        } catch (e: ApiException) {
+            isLoading = false
+            Toast.makeText(context, "Google Hatası: ${e.localizedMessage} (Kod: ${e.statusCode})", Toast.LENGTH_LONG).show()
         }
     }
 
@@ -121,27 +178,13 @@ fun GoogleSignInScreen(
                         modifier = Modifier.fillMaxWidth(),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        // 1. Hesap Seçeneği (Berna'nın hesabı)
                         AccountRow(
-                            name = "Berna Çelik",
-                            email = "bernacelik@gmail.com",
-                            initial = "B",
+                            name = "Google Hesabı Seç",
+                            email = "Oturum açmak için dokunun",
+                            initial = "G",
                             color = GoldPrimary,
                             onClick = {
-                                selectedAccount = "Berna Çelik"
-                                isLoading = true
-                            }
-                        )
-
-                        // 2. Hesap Seçeneği (Misafir/Alternatif hesap)
-                        AccountRow(
-                            name = "Berna Ödev Hesabı",
-                            email = "berna.celik@ogrenci.com",
-                            initial = "B",
-                            color = Color(0xFF4285F4),
-                            onClick = {
-                                selectedAccount = "Berna Ödev Hesabı"
-                                isLoading = true
+                                launcher.launch(googleSignInClient.signInIntent)
                             }
                         )
                     }

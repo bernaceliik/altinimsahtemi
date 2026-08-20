@@ -30,6 +30,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bernacelik.altinimsahtemi.ui.theme.*
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.auth.api.signin.GoogleSignInOptions
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -41,14 +45,42 @@ fun ProfileScreen(
 ) {
     val context = LocalContext.current
 
-    val userRole = if (isKuyumcu) "Kuyumcu Üye" else "Bireysel Kullanıcı"
-    val groupLabel = if (isKuyumcu) "Kuyumcu" else "Bireysel"
-
-    var name by remember { mutableStateOf("Can Yılmaz") }
-    var email by remember { mutableStateOf("can@ornek.com") }
-    var phone by remember { mutableStateOf("+90 555 123 4567") }
+    val currentUser = remember { FirebaseAuth.getInstance().currentUser }
+    var name by remember { mutableStateOf(currentUser?.displayName ?: "Kullanıcı") }
+    var email by remember { mutableStateOf(currentUser?.email ?: "e-posta@belirtilmedi.com") }
+    var phone by remember { mutableStateOf(currentUser?.phoneNumber ?: "+90 555 000 0000") }
+    
+    var userRole by remember { mutableStateOf(if (isKuyumcu) "Kuyumcu Üye" else "Bireysel Kullanıcı") }
+    var groupLabel by remember { mutableStateOf(if (isKuyumcu) "Kuyumcu" else "Bireysel") }
     var profileImageUri by remember { mutableStateOf<Uri?>(null) }
     var isTwoFactorEnabled by remember { mutableStateOf(true) }
+
+    LaunchedEffect(currentUser?.uid) {
+        val uid = currentUser?.uid
+        if (uid != null) {
+            FirebaseFirestore.getInstance().collection("users").document(uid).get()
+                .addOnSuccessListener { doc ->
+                    if (doc.exists()) {
+                        val firestoreName = doc.getString("businessName")
+                        if (!firestoreName.isNullOrBlank()) {
+                            name = firestoreName
+                        } else {
+                            val dispName = currentUser.displayName
+                            if (!dispName.isNullOrBlank()) name = dispName
+                        }
+                        val role = doc.getString("role") ?: "User"
+                        val isApproved = doc.getBoolean("isApproved") ?: false
+                        val isKuyumcuFromDb = (role == "jeweler")
+                        
+                        userRole = if (isKuyumcuFromDb) {
+                            if (isApproved) "Kuyumcu Üye (Onaylı)" else "Kuyumcu Üye (Onay Bekliyor)"
+                        } else "Bireysel Kullanıcı"
+                        
+                        groupLabel = if (isKuyumcuFromDb) "Kuyumcu" else "Bireysel"
+                    }
+                }
+        }
+    }
 
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
@@ -119,7 +151,19 @@ fun ProfileScreen(
             }
         }
         Spacer(modifier = Modifier.height(32.dp))
-        Button(onClick = onLogout, modifier = Modifier.fillMaxWidth().height(56.dp), colors = ButtonDefaults.buttonColors(containerColor = DarkSurface), shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, Color(0xFFF44336).copy(alpha = 0.4f))) {
+        Button(
+            onClick = {
+                FirebaseAuth.getInstance().signOut()
+                val gso = GoogleSignInOptions.Builder(GoogleSignInOptions.DEFAULT_SIGN_IN).build()
+                GoogleSignIn.getClient(context, gso).signOut().addOnCompleteListener {
+                    onLogout()
+                }
+            },
+            modifier = Modifier.fillMaxWidth().height(56.dp),
+            colors = ButtonDefaults.buttonColors(containerColor = DarkSurface),
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, Color(0xFFF44336).copy(alpha = 0.4f))
+        ) {
             Text("Oturumu Kapat", color = Color(0xFFF44336), fontSize = 16.sp, fontWeight = FontWeight.Bold)
         }
         Spacer(modifier = Modifier.height(60.dp))

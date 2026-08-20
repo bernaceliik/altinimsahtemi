@@ -33,6 +33,12 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 import com.bernacelik.altinimsahtemi.ui.theme.*
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
 
 import kotlinx.coroutines.delay
 
@@ -52,7 +58,7 @@ fun AudioRecordScreen(
 
     onNavigateBack: () -> Unit,
 
-    onNavigateToReview: (duration: String) -> Unit,
+    onNavigateToReview: (duration: String, wavPath: String) -> Unit,
 
     onNavigateToProfile: () -> Unit // YENİ: Profil yönlendirme parametresi eklendi!
 
@@ -63,6 +69,34 @@ fun AudioRecordScreen(
     var seconds by remember { mutableStateOf(0) }
 
     var milliseconds by remember { mutableStateOf(0) }
+
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var livePeakDbfs by remember { mutableStateOf(-120f) }
+    var liveRmsDbfs by remember { mutableStateOf(-120f) }
+    var liveNoiseFloorDbfs by remember { mutableStateOf(-120f) }
+    var captureEngineJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+
+    var hasPermission by remember {
+        mutableStateOf(
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.RECORD_AUDIO
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasPermission = granted
+    }
+
+    LaunchedEffect(Unit) {
+        if (!hasPermission) {
+            permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+        }
+    }
 
 
 
@@ -234,6 +268,15 @@ fun AudioRecordScreen(
 
 // Ses Dalgası Paneli (Waveform Box)
 
+        val visualHeight = remember(livePeakDbfs, isRecording) {
+            if (!isRecording) 15f
+            else {
+                val db = livePeakDbfs.coerceIn(-60f, 0f)
+                val fraction = (db + 60f) / 60f
+                (15f + fraction * 100f)
+            }
+        }
+
         Box(
 
             modifier = Modifier
@@ -256,7 +299,7 @@ fun AudioRecordScreen(
 
             ) {
 
-                listOf(waveHeight1, waveHeight2, waveHeight1 * 1.2f, waveHeight2 * 0.8f, waveHeight1).forEach { height ->
+                listOf(visualHeight * 0.6f, visualHeight * 0.8f, visualHeight, visualHeight * 0.7f, visualHeight * 0.4f).forEach { height ->
 
                     Box(
 
@@ -351,21 +394,69 @@ fun AudioRecordScreen(
                     .clickable {
 
                         if (isRecording) {
-
                             isRecording = false
-
-                            onNavigateToReview(formattedTime)
-
+                            captureEngineJob?.cancel()
+                            val mockWav = java.io.File(context.cacheDir, "temp_capture.wav")
+                            if (!mockWav.exists()) {
+                                com.bernacelik.altinimsahtemi.audio.WavWriter.write(
+                                    file = mockWav,
+                                    samples = FloatArray(1024),
+                                    sampleRate = 44100,
+                                    encoding = com.bernacelik.altinimsahtemi.audio.PcmEncoding.PCM_16,
+                                    channelCount = 1
+                                )
+                            }
+                            val encodedPath = android.net.Uri.encode(mockWav.absolutePath)
+                            onNavigateToReview(formattedTime, encodedPath)
                         } else {
-
-// Sıfırla ve Başlat
-
+                            if (!hasPermission) {
+                                permissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                return@clickable
+                            }
                             seconds = 0
-
                             milliseconds = 0
-
                             isRecording = true
-
+                            
+                            val profile = com.bernacelik.altinimsahtemi.audio.AudioCapabilities.detectBestProfile(context)
+                            if (profile != null) {
+                                val engine = com.bernacelik.altinimsahtemi.audio.CaptureEngine(profile)
+                                captureEngineJob = coroutineScope.launch(Dispatchers.IO) {
+                                    try {
+                                        engine.events().collect { event ->
+                                            when (event) {
+                                                is com.bernacelik.altinimsahtemi.audio.CaptureEvent.Level -> {
+                                                    livePeakDbfs = event.peakDbfs
+                                                    liveRmsDbfs = event.rmsDbfs
+                                                    liveNoiseFloorDbfs = event.noiseFloorDbfs
+                                                }
+                                                is com.bernacelik.altinimsahtemi.audio.CaptureEvent.Impact -> {
+                                                    val impact = event.capture
+                                                    val wavFile = java.io.File(context.cacheDir, "temp_capture.wav")
+                                                    com.bernacelik.altinimsahtemi.audio.WavWriter.write(
+                                                        file = wavFile,
+                                                        samples = impact.samples,
+                                                        sampleRate = impact.profile.sampleRate,
+                                                        encoding = impact.profile.encoding,
+                                                        channelCount = 1
+                                                    )
+                                                    
+                                                    coroutineScope.launch(Dispatchers.Main) {
+                                                        isRecording = false
+                                                        captureEngineJob?.cancel()
+                                                        val encodedPath = android.net.Uri.encode(wavFile.absolutePath)
+                                                        onNavigateToReview(formattedTime, encodedPath)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        e.printStackTrace()
+                                    }
+                                }
+                            } else {
+                                android.widget.Toast.makeText(context, "Kayıt donanımı başlatılamadı.", android.widget.Toast.LENGTH_SHORT).show()
+                                isRecording = false
+                            }
                         }
 
                     },
